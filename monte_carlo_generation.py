@@ -263,7 +263,7 @@ def main():
     Main function to run the Monte Carlo simulation.
     """
     
-    use_lognormal = False
+    use_lognormal = False       # Set to True to use lognormal distribution
     if use_lognormal:
         output_csv = "expanded_monte_carlo_topk_lognormal.csv"
     else:
