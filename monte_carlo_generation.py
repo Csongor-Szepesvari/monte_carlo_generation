@@ -22,7 +22,7 @@ def stars_and_bars_partition(total_n, k=4, rng=None):
     parts = [cuts[0]] + [cuts[i] - cuts[i - 1] for i in range(1, k - 1)] + [total_n - cuts[-1]]
     return parts
 
-def simulate_topk_given_fixed_config(mu, sigma, n_parts, k, rng):
+def simulate_topk_given_fixed_config(mu, sigma, n_parts, k, rng, use_lognormal=False):
     """
     Simulate drawing from normal distributions and calculate the sum of top-k elements.
     
@@ -32,6 +32,7 @@ def simulate_topk_given_fixed_config(mu, sigma, n_parts, k, rng):
         n_parts (list): Number of samples to draw from each distribution
         k (int): Number of top elements to sum
         rng (numpy.random.Generator): Random number generator
+        use_lognormal (bool): Whether to use lognormal distribution instead of normal (default: False)
         
     Returns:
         float: Sum of the top-k elements
@@ -40,13 +41,17 @@ def simulate_topk_given_fixed_config(mu, sigma, n_parts, k, rng):
     for i in range(4):
         draws = n_parts[i]
         if draws > 0:
-            samples = mu[i] + sigma[i] * rng.standard_normal(draws)
+            if use_lognormal:
+                # For lognormal, mu and sigma are the mean and std of the underlying normal distribution
+                samples = rng.lognormal(mean=mu[i], sigma=sigma[i], size=draws)
+            else:
+                samples = mu[i] + sigma[i] * rng.standard_normal(draws)
             all_samples.append(samples)
     combined = np.concatenate(all_samples)
     top_k = np.sort(combined)[-k:] if len(combined) >= k else combined
     return float(np.sum(top_k))
 
-def monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=0.01, max_rep=10000):
+def monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=0.01, max_rep=10000, use_lognormal=False):
     """
     Perform adaptive Monte Carlo estimation for the sum of top-k elements.
     Continues sampling until the relative error is below epsilon or max_rep is reached.
@@ -58,6 +63,7 @@ def monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=0.01, max_rep=1
         k (int): Maximum number of top elements to sum
         epsilon (float): Target relative error threshold (default: 0.01)
         max_rep (int): Maximum number of replications (default: 10000)
+        use_lognormal (bool): Whether to use lognormal distribution instead of normal (default: False)
         
     Returns:
         tuple: (dict of top-k sums for k=1 to k, number of replications performed)
@@ -73,7 +79,10 @@ def monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=0.01, max_rep=1
         for i in range(4):
             draws = n_parts[i]
             if draws > 0:
-                samples = mu[i] + sigma[i] * rng.standard_normal(draws)
+                if use_lognormal:
+                    samples = rng.lognormal(mean=mu[i], sigma=sigma[i], size=draws)
+                else:
+                    samples = mu[i] + sigma[i] * rng.standard_normal(draws)
                 all_samples.append(samples)
         
         combined = np.concatenate(all_samples)
@@ -102,7 +111,10 @@ def monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=0.01, max_rep=1
             for i in range(4):
                 draws = n_parts[i]
                 if draws > 0:
-                    samples = mu[i] + sigma[i] * rng.standard_normal(draws)
+                    if use_lognormal:
+                        samples = rng.lognormal(mean=mu[i], sigma=sigma[i], size=draws)
+                    else:
+                        samples = mu[i] + sigma[i] * rng.standard_normal(draws)
                     all_samples.append(samples)
             
             combined = np.concatenate(all_samples)
@@ -128,7 +140,7 @@ def monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=0.01, max_rep=1
     
     return topk_means, R
 
-def process_row_with_multiple_configs(row, n_values=None, num_partitions=5, epsilon=0.01):
+def process_row_with_multiple_configs(row, n_values=None, num_partitions=5, epsilon=0.01, use_lognormal=False):
     """
     Process a single row of parameters with multiple configurations.
     
@@ -138,6 +150,7 @@ def process_row_with_multiple_configs(row, n_values=None, num_partitions=5, epsi
         n_values (list): List of total sample sizes to try
         num_partitions (int): Number of different partitions to try per n value
         epsilon (float): Target relative error threshold
+        use_lognormal (bool): Whether to use lognormal distribution instead of normal (default: False)
         
     Returns:
         list: List of result rows
@@ -151,7 +164,7 @@ def process_row_with_multiple_configs(row, n_values=None, num_partitions=5, epsi
         k = int(total_n*0.25)
         for _ in range(num_partitions):
             n_parts = stars_and_bars_partition(total_n, rng=rng)
-            topk_means, num_reps = monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=epsilon)
+            topk_means, num_reps = monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=epsilon, use_lognormal=use_lognormal)
             
             # Create a base result with common values
             base_result = list(mu) + list(sigma) + [total_n] + n_parts
@@ -162,8 +175,8 @@ def process_row_with_multiple_configs(row, n_values=None, num_partitions=5, epsi
     
     return results
 
-def process_row_wrapper(row, n_values, num_partitions, epsilon):
-    return process_row_with_multiple_configs(row, n_values, num_partitions, epsilon)
+def process_row_wrapper(row, n_values, num_partitions, epsilon, use_lognormal):
+    return process_row_with_multiple_configs(row, n_values, num_partitions, epsilon, use_lognormal)
 
 def generate_expanded_monte_carlo_dataset(
         csv_path,
@@ -171,7 +184,8 @@ def generate_expanded_monte_carlo_dataset(
         num_partitions=5,
         epsilon=0.01,
         parallel=True,
-        output_csv="expanded_monte_carlo_topk.csv"
+        output_csv="expanded_monte_carlo_topk.csv",
+        use_lognormal=False
     ):
     """
     Generate an expanded Monte Carlo dataset for top-k sum prediction.
@@ -183,6 +197,7 @@ def generate_expanded_monte_carlo_dataset(
         epsilon (float): Target relative error threshold
         parallel (bool): Whether to use parallel processing
         output_csv (str): Path to output CSV file
+        use_lognormal (bool): Whether to use lognormal distribution instead of normal (default: False)
         
     Returns:
         None: Results are saved to output_csv
@@ -205,7 +220,8 @@ def generate_expanded_monte_carlo_dataset(
                 param_array,
                 [n_values] * len(param_array),
                 [num_partitions] * len(param_array),
-                [epsilon] * len(param_array)
+                [epsilon] * len(param_array),
+                [use_lognormal] * len(param_array)
             ))
             nested_results = []
             for i, future in enumerate(futures):
@@ -220,7 +236,7 @@ def generate_expanded_monte_carlo_dataset(
         nested_results = []
         for i, row in enumerate(param_array):
             result = process_row_with_multiple_configs(
-                row, n_values=n_values, num_partitions=num_partitions, epsilon=epsilon
+                row, n_values=n_values, num_partitions=num_partitions, epsilon=epsilon, use_lognormal=use_lognormal
             )
             nested_results.append(result)
             if (i+1) % max(1, total_rows//10) == 0:  # Report every 10%
@@ -252,7 +268,8 @@ def main():
         num_partitions=10,                # 10 stars-and-bars per n
         epsilon=0.01,                     # relative error threshold
         parallel=True,
-        output_csv="expanded_monte_carlo_topk.csv"
+        output_csv="expanded_monte_carlo_topk.csv",
+        use_lognormal=False
     )
 
 if __name__ == "__main__":
