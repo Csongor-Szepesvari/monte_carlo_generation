@@ -47,18 +47,17 @@ Navigate to the `notebooks/` directory and open the desired notebook (e.g., `top
 Follow the instructions in the notebook to train and evaluate the model.
 
 ## Project Structure
-your-repo-name/
-├── environment.yml # Conda environment configuration
-├── import_model.py # grabs the trained neural network and uses it for prediction
-├── runs/ # information from the runs
-|├── best_model.pt # the stored best model 
-├── expanded_monte_carlo_topk.csv # training data
-├── mu_sigma_combinations.csv # used to generate monte carlo data
-├── monte_carlo_generation.py # pipeline for taking combinations and finding ground truth labels using adaptive Monte Carlo sampling
-├── parameter_csv_writer.py # used to combine mu and sigma values into a csv usable by monte_carlo_generation.py
-├── top_k_predictor.py # file containing neural network architecture and training
-├── README.md # This file
-└── requirements.txt # Pip requirements (optional)
+- `environment.yml` # Conda environment configuration
+- `import_model.py` # grabs the trained neural network and uses it for prediction
+- `runs/` # information from the runs
+- `best_model.pt` # the stored best model 
+- `expanded_monte_carlo_topk.csv` # training data
+- `mu_sigma_combinations.csv` # used to generate monte carlo data
+- `monte_carlo_generation.py` # pipeline for taking combinations and finding ground truth labels using adaptive Monte Carlo sampling
+- `parameter_csv_writer.py` # used to combine mu and sigma values into a csv usable by monte_carlo_generation.py
+- `top_k_predictor.py` # file containing neural network architecture and training
+- `README.md` # This file
+- `requirements.txt` # Pip requirements (optional)
 
 ## Troubleshooting
 
