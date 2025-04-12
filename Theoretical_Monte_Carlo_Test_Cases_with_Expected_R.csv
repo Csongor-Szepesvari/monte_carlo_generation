@@ -1,0 +1,11 @@
+description,mu,sigma,n_parts,k,epsilon,R_expected
+"Uniform means, low variance","[10, 10, 10, 10]","[0.1, 0.1, 0.1, 0.1]","[100, 100, 100, 100]",5,0.01,10
+"Distinct means, same variance","[5, 10, 15, 20]","[1, 1, 1, 1]","[100, 100, 100, 100]",4,0.01,10
+One dominant source of high mean,"[1, 1, 1, 100]","[1, 1, 1, 1]","[100, 100, 100, 100]",3,0.01,10
+High variance in all components,"[10, 20, 30, 40]","[10, 10, 10, 10]","[100, 100, 100, 100]",5,0.02,50
+"Few total samples, close to k","[10, 20, 30, 40]","[1, 1, 1, 1]","[1, 1, 1, 2]",5,0.1,10
+High imbalance in sample sizes,"[10, 10, 10, 10]","[1, 1, 1, 1]","[10, 10, 10, 1000]",10,0.01,10
+"Very tight error, moderate variance","[5, 10, 15, 20]","[2, 2, 2, 2]","[100, 100, 100, 100]",3,0.001,100
+One empty component,"[5, 10, 15, 20]","[1, 1, 1, 1]","[0, 100, 100, 100]",2,0.01,10
+All-zero variance (deterministic),"[5, 10, 15, 20]","[0, 0, 0, 0]","[50, 50, 50, 50]",2,1e-05,10
+High mean & high variance,"[100, 200, 300, 400]","[50, 50, 50, 50]","[100, 100, 100, 100]",10,0.005,80
