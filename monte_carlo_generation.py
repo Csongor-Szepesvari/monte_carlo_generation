@@ -262,14 +262,21 @@ def main():
     """
     Main function to run the Monte Carlo simulation.
     """
+    
+    use_lognormal = False
+    if use_lognormal:
+        output_csv = "expanded_monte_carlo_topk_lognormal.csv"
+    else:
+        output_csv = "expanded_monte_carlo_topk.csv"
+    
     generate_expanded_monte_carlo_dataset(
         csv_path="mu_sigma_combinations.csv",
         n_values=None,                    # Run the default
         num_partitions=10,                # 10 stars-and-bars per n
         epsilon=0.01,                     # relative error threshold
         parallel=True,
-        output_csv="expanded_monte_carlo_topk.csv",
-        use_lognormal=False
+        output_csv=output_csv,
+        use_lognormal=use_lognormal
     )
 
 if __name__ == "__main__":
