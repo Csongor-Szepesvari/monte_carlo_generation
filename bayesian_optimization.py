@@ -59,8 +59,8 @@ class BayesianOptimizer:
         Objective function for Bayesian optimization.
         
         Args:
-            X (torch.Tensor): Input parameters of shape [batch_size, 4]
-                             (n values for all 4 groups)
+            X (torch.Tensor): Input parameters of shape [batch_size, 3]
+                             (n values for n1, n2, n3)
         
         Returns:
             torch.Tensor: Predicted top-k sum
@@ -79,12 +79,18 @@ class BayesianOptimizer:
             k = self.df.iloc[sample_idx]['k']
             total_n = self.df.iloc[sample_idx]['total_n']
             k_values[i] = k / total_n  # Normalize k by total_n
-        
-        # Set all values from X
-        for i in range(4):
-            x[:, i, 0] = torch.tensor(self.mu_values[i], device=self.device, dtype=torch.float64)  # mu
-            x[:, i, 1] = torch.tensor(self.sigma_values[i], device=self.device, dtype=torch.float64)  # sigma
-            x[:, i, 2] = X[:, i]  # n values
+            
+            # Calculate n4
+            n1, n2, n3 = X[i].cpu().numpy()
+            n4 = total_n - (n1 + n2 + n3)
+            
+            # Set all values from X
+            x[i, :, 0] = torch.tensor(self.mu_values, device=self.device, dtype=torch.float64)  # mu
+            x[i, :, 1] = torch.tensor(self.sigma_values, device=self.device, dtype=torch.float64)  # sigma
+            x[i, 0, 2] = n1  # n1
+            x[i, 1, 2] = n2  # n2
+            x[i, 2, 2] = n3  # n3
+            x[i, 3, 2] = n4  # n4
         
         with torch.no_grad():
             predictions = self.model(x, k_values)
@@ -102,9 +108,9 @@ class BayesianOptimizer:
         Returns:
             dict: Results of the optimization
         """
-        # Generate initial random samples for all n values
-        train_X = torch.zeros(n_init, 4, device=self.device)
-        for i in range(4):
+        # Generate initial random samples for n1, n2, n3
+        train_X = torch.zeros(n_init, 3, device=self.device)
+        for i in range(3):  # Only for n1, n2, n3
             train_X[:, i] = torch.randint(
                 self.n_bounds[f'n{i+1}'][0],
                 self.n_bounds[f'n{i+1}'][1] + 1,
@@ -112,7 +118,7 @@ class BayesianOptimizer:
             ).double()  # Use double precision
         
         # Scale to unit cube
-        train_X = (train_X - self.lower_bounds) / (self.upper_bounds - self.lower_bounds)
+        train_X = (train_X - self.lower_bounds[:3]) / (self.upper_bounds[:3] - self.lower_bounds[:3])
         
         train_Y = self.objective_function(train_X)
         
@@ -135,8 +141,8 @@ class BayesianOptimizer:
             candidates, _ = optimize_acqf(
                 ei,
                 bounds=torch.tensor([
-                    [0.0] * 4,  # Scaled bounds
-                    [1.0] * 4
+                    [0.0] * 3,  # Scaled bounds for n1, n2, n3
+                    [1.0] * 3
                 ]).to(self.device).double(),  # Use double precision
                 q=1,
                 num_restarts=20,
@@ -151,7 +157,7 @@ class BayesianOptimizer:
             valid_candidates = []
             valid_new_Y = []
             for j, candidate in enumerate(candidates):
-                n1, n2, n3, n4 = candidate.cpu().numpy()
+                n1, n2, n3 = candidate.cpu().numpy()  # Only unpack n1, n2, n3
                 total_n = self.df.iloc[torch.randint(0, len(self.df), (1,)).item()]['total_n']
                 is_valid, n4, message = self.verify_solution(n1, n2, n3, total_n)
                 if is_valid:
@@ -179,8 +185,8 @@ class BayesianOptimizer:
         best_params = train_X[best_idx]
         
         # Rescale parameters back to original scale
-        best_params = best_params * (self.upper_bounds - self.lower_bounds) + self.lower_bounds
-        train_X = train_X * (self.upper_bounds - self.lower_bounds) + self.lower_bounds
+        best_params = best_params * (self.upper_bounds[:3] - self.lower_bounds[:3]) + self.lower_bounds[:3]
+        train_X = train_X * (self.upper_bounds[:3] - self.lower_bounds[:3]) + self.lower_bounds[:3]
         
         return {
             'best_params': best_params.cpu().numpy(),
@@ -202,7 +208,7 @@ class BayesianOptimizer:
         os.makedirs(output_dir, exist_ok=True)
         
         # Plot parameter distributions
-        param_names = [f"n{i+1}" for i in range(4)]  # Only plot n1, n2, n3, n4
+        param_names = [f"n{i+1}" for i in range(3)]  
         train_X = results['train_X']
         
         plt.figure(figsize=(15, 5))
