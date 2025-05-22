@@ -203,16 +203,19 @@ def evaluate(model, dataloader, loss_fn, device):
         device (torch.device): Device to use for evaluation
         
     Returns:
-        tuple: (avg_loss, mse, mae, r2) where:
-            - avg_loss is the average loss
-            - mse is the mean squared error
-            - mae is the mean absolute error
-            - r2 is the R^2 score
+        tuple: (avg_loss, mse, mae, r2, mape, relative_mse) where:
+            - avg_loss: Average loss
+            - mse: Mean squared error
+            - mae: Mean absolute error
+            - r2: R^2 score
+            - mape: Mean absolute percentage error (%)
+            - relative_mse: MSE relative to mean of true values
     """
     model.eval()
     total_loss = 0
     y_true = []
     y_pred_all = []
+    
     with torch.no_grad():
         for x, k, y in dataloader:
             x, k, y = x.to(device), k.to(device), y.to(device).squeeze(-1)
@@ -221,13 +224,23 @@ def evaluate(model, dataloader, loss_fn, device):
             total_loss += loss.item() * x.size(0)
             y_true.append(y.cpu().numpy())
             y_pred_all.append(preds.cpu().numpy())
-
+    
     y_true = np.concatenate(y_true)
     y_pred_all = np.concatenate(y_pred_all)
+    
+    # Standard metrics
     mse = mean_squared_error(y_true, y_pred_all)
     mae = mean_absolute_error(y_true, y_pred_all)
     r2 = r2_score(y_true, y_pred_all)
-    return total_loss / len(dataloader.dataset), mse, mae, r2
+    
+    # Relative metrics
+    mape = np.mean(np.abs((y_true - y_pred_all) / y_true)) * 100  # MAPE (%)
+    relative_mse = mse / np.mean(y_true ** 2)  # MSE relative to mean squared true values
+    
+    return (
+        total_loss / len(dataloader.dataset),
+        mse, mae, r2, mape, relative_mse
+    )
 
 def plot_losses(train_losses, val_losses, output_path):
     """
@@ -252,9 +265,9 @@ if __name__ == '__main__':
     # Configuration parameters
     batch_size = 64
     lr = 1e-3
-    epochs = 100
+    epochs = 1000
     patience = 10
-    csv_path = 'expanded_monte_carlo_topk.csv'
+    csv_path = 'mixed_monte_carlo_topk.csv'
     log_dir = "runs/topk_experiment"
     os.makedirs(log_dir, exist_ok=True)
 
@@ -288,7 +301,7 @@ if __name__ == '__main__':
     for epoch in range(epochs):
         epoch_start = time.time()
         train_loss = train(model, train_loader, optimizer, loss_fn, device)
-        val_loss, _, _, _ = evaluate(model, val_loader, loss_fn, device)
+        val_loss, mse, mae, r2, mape, relative_mse = evaluate(model, val_loader, loss_fn, device)
         epoch_time = time.time() - epoch_start
 
         train_losses.append(train_loss)
@@ -300,14 +313,20 @@ if __name__ == '__main__':
 
         scheduler.step(val_loss)
 
-        print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}, Time = {epoch_time:.2f}s")
+        print(
+            f"Epoch {epoch+1}: "
+            f"Train Loss = {train_loss:.4f}, "
+            f"Val Loss = {val_loss:.4f}, "
+            f"MAPE = {mape:.2f}%, "
+            f"Relative MSE = {relative_mse:.4f}"
+        )
 
         # Save best model and check for early stopping
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             epochs_no_improve = 0
-            torch.save(model.state_dict(), os.path.join(log_dir, "best_model.pt"))
-            torch.jit.save(torch.jit.script(model), os.path.join(log_dir, "best_model.pt.jit"))
+            torch.save(model.state_dict(), os.path.join(log_dir, "best_model_biased.pt"))
+            torch.jit.save(torch.jit.script(model), os.path.join(log_dir, "best_model_biased.pt.jit"))
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= patience:
@@ -321,9 +340,9 @@ if __name__ == '__main__':
     print(f"Training completed in {total_time:.2f} seconds.")
 
     # Plot and save loss curves
-    plot_losses(train_losses, val_losses, os.path.join(log_dir, "loss_curve.png"))
+    plot_losses(train_losses, val_losses, os.path.join(log_dir, "loss_curve_biased.png"))
 
     # Final evaluation on validation set
-    model.load_state_dict(torch.load(os.path.join(log_dir, "best_model.pt")))
-    _, mse, mae, r2 = evaluate(model, val_loader, loss_fn, device)
-    print(f"Final evaluation on validation set:\n  MSE = {mse:.4f}\n  MAE = {mae:.4f}\n  R^2 = {r2:.4f}")
+    model.load_state_dict(torch.load(os.path.join(log_dir, "best_model_biased.pt")))
+    _, mse, mae, r2, mape, relative_mse = evaluate(model, val_loader, loss_fn, device)
+    print(f"Final evaluation on validation set:\n  MSE = {mse:.4f}\n  MAE = {mae:.4f}\n  R^2 = {r2:.4f}\n  MAPE = {mape:.2f}%\n  Relative MSE = {relative_mse:.4f}")

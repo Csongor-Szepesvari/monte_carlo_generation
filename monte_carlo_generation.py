@@ -22,6 +22,51 @@ def stars_and_bars_partition(total_n, k=4, rng=None):
     parts = [cuts[0]] + [cuts[i] - cuts[i - 1] for i in range(1, k - 1)] + [total_n - cuts[-1]]
     return parts
 
+
+def biased_stars_and_bars_partition(total_n, k=4, rng=None, bias_factor=2.0):
+    """
+    Generate a random partition of total_n into k parts with bias towards first partition.
+    
+    Args:
+        total_n (int): The total number to partition
+        k (int): Number of parts to divide into (default: 4)
+        rng (numpy.random.Generator): Random number generator
+        bias_factor (float): How much to bias towards first partition (default: 2.0)
+        
+    Returns:
+        list: A list of k integers that sum to total_n
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    
+    # Generate weights for each partition
+    weights = np.ones(k)
+    weights[0] = bias_factor  # Higher weight for first partition
+    
+    # Generate cuts with probability proportional to weights
+    cuts = []
+    remaining = total_n
+    for i in range(k-1):
+        if remaining == 0:
+            cuts.append(0)
+            continue
+            
+        # Calculate probabilities for next cut
+        probs = weights[i+1:] / weights[i+1:].sum()
+        # Generate next cut position
+        next_cut = rng.integers(0, remaining+1)
+        # Apply probability weights
+        next_cut = int(next_cut * (1 - probs[0]))
+        cuts.append(next_cut)
+        remaining -= next_cut
+    
+    cuts.sort()
+    parts = [cuts[0]] + [cuts[i] - cuts[i-1] for i in range(1, k-1)] + [total_n - cuts[-1]]
+    return parts
+
+
+
+
 def simulate_topk_given_fixed_config(mu, sigma, n_parts, k, rng):
     """
     Simulate drawing from normal distributions and calculate the sum of top-k elements.
@@ -128,16 +173,20 @@ def monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=0.01, max_rep=1
     
     return topk_means, R
 
-def process_row_with_multiple_configs(row, n_values=None, num_partitions=5, epsilon=0.01):
+def process_row_with_multiple_configs(
+        row, n_values=None, num_partitions=5, epsilon=0.01, 
+        bias_fraction=0.5, bias_factor=2.0
+    ):
     """
-    Process a single row of parameters with multiple configurations.
+    Process a single row of parameters with a mix of biased and non-biased partitions.
     
     Args:
         row (array): Array containing mu and sigma values
-        k (int): Maximum number of top elements to sum (default: 5)
         n_values (list): List of total sample sizes to try
         num_partitions (int): Number of different partitions to try per n value
         epsilon (float): Target relative error threshold
+        bias_fraction (float): Fraction of partitions to bias (default: 0.5)
+        bias_factor (float): Bias factor for first partition (default: 2.0)
         
     Returns:
         list: List of result rows
@@ -148,22 +197,31 @@ def process_row_with_multiple_configs(row, n_values=None, num_partitions=5, epsi
     results = []
 
     for total_n in n_values:
-        k = int(total_n*0.25)
-        for _ in range(num_partitions):
-            n_parts = stars_and_bars_partition(total_n, rng=rng)
+        k = int(total_n * 0.25)
+        for i in range(num_partitions):
+            # Decide whether to use biased or non-biased partition
+            use_biased = rng.random() < bias_fraction
+            if use_biased:
+                n_parts = biased_stars_and_bars_partition(total_n, rng=rng, bias_factor=bias_factor)
+            else:
+                n_parts = stars_and_bars_partition(total_n, rng=rng)
+            
             topk_means, num_reps = monte_carlo_adaptive_estimate(mu, sigma, n_parts, k, epsilon=epsilon)
             
             # Create a base result with common values
             base_result = list(mu) + list(sigma) + [total_n] + n_parts
             
             # Add a row for each k value
-            for j in range(1, k+1):
+            for j in range(1, k + 1):
                 results.append(base_result + [j, topk_means[j], num_reps])
     
     return results
 
-def process_row_wrapper(row, n_values, num_partitions, epsilon):
-    return process_row_with_multiple_configs(row, n_values, num_partitions, epsilon)
+def process_row_wrapper(row, n_values, num_partitions, epsilon, bias_fraction, bias_factor):
+    """Wrapper function for parallel processing (must be at module level for pickling)."""
+    return process_row_with_multiple_configs(
+        row, n_values, num_partitions, epsilon, bias_fraction, bias_factor
+    )
 
 def generate_expanded_monte_carlo_dataset(
         csv_path,
@@ -171,10 +229,12 @@ def generate_expanded_monte_carlo_dataset(
         num_partitions=5,
         epsilon=0.01,
         parallel=True,
-        output_csv="expanded_monte_carlo_topk.csv"
+        output_csv="expanded_monte_carlo_topk.csv",
+        bias_fraction=0.5,
+        bias_factor=2.0
     ):
     """
-    Generate an expanded Monte Carlo dataset for top-k sum prediction.
+    Generate a Monte Carlo dataset with a mix of biased and non-biased partitions.
     
     Args:
         csv_path (str): Path to input CSV with mu and sigma values
@@ -183,6 +243,8 @@ def generate_expanded_monte_carlo_dataset(
         epsilon (float): Target relative error threshold
         parallel (bool): Whether to use parallel processing
         output_csv (str): Path to output CSV file
+        bias_fraction (float): Fraction of partitions to bias (default: 0.5)
+        bias_factor (float): Bias factor for first partition (default: 2.0)
         
     Returns:
         None: Results are saved to output_csv
@@ -205,7 +267,9 @@ def generate_expanded_monte_carlo_dataset(
                 param_array,
                 [n_values] * len(param_array),
                 [num_partitions] * len(param_array),
-                [epsilon] * len(param_array)
+                [epsilon] * len(param_array),
+                [bias_fraction] * len(param_array),
+                [bias_factor] * len(param_array)
             ))
             nested_results = []
             for i, future in enumerate(futures):
@@ -220,7 +284,8 @@ def generate_expanded_monte_carlo_dataset(
         nested_results = []
         for i, row in enumerate(param_array):
             result = process_row_with_multiple_configs(
-                row, n_values=n_values, num_partitions=num_partitions, epsilon=epsilon
+                row, n_values=n_values, num_partitions=num_partitions, 
+                epsilon=epsilon, bias_fraction=bias_fraction, bias_factor=bias_factor
             )
             nested_results.append(result)
             if (i+1) % max(1, total_rows//10) == 0:  # Report every 10%
@@ -252,7 +317,9 @@ def main():
         num_partitions=10,                # 10 stars-and-bars per n
         epsilon=0.01,                     # relative error threshold
         parallel=True,
-        output_csv="expanded_monte_carlo_topk.csv"
+        output_csv="mixed_monte_carlo_topk.csv",
+        bias_fraction=0.5,                # 50% of partitions will be biased
+        bias_factor=2.0                   # First partition gets 2x weight
     )
 
 if __name__ == "__main__":

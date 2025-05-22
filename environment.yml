@@ -21,6 +21,7 @@ dependencies:
   - pip:
     - tensorboard==2.19.0
     - tensorboard-data-server==0.7.0
+    - bayes-opt==2.0.0
 platforms:
   - linux-64
   - win-64
