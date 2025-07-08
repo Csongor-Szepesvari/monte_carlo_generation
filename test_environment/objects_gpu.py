@@ -5,9 +5,11 @@ import time as t
 import logging
 from bayes_opt import BayesianOptimization
 import torch
+import itertools
 
 # Configure logging
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 def calculate_replicates_for_top_k(
     params,          # List of (dist_type, mu, sigma, sample_size) tuples
@@ -73,6 +75,14 @@ def calculate_replicates_for_top_k(
     return num_replicates
 
 def transform_mu_sigma_to_log(mu, sigma):
+    """
+    Transform mean and standard deviation to log-normal parameters.
+    Currently take the log of the mean and standard deviation and divide by 2.
+
+    Parameters:
+        mu (float): Mean of the normal distribution
+        sigma (float): Standard deviation of the normal distribution
+    """
     sigma_log = np.log(sigma) / 2
     mu_log = np.log(mu) / 2
     return mu_log, sigma_log
@@ -101,7 +111,28 @@ def generate_samples_top_k(categories, top_k=None):
 
 
 class Category:
-    def __init__(self, name, mu, sigma, size, log_or_normal):
+    """A class representing a category of elements with specific distribution properties.
+    
+    Attributes:
+        name (str): Name of the category
+        size (int): Total number of elements in the category
+        log_normal (str): Distribution type ('log' for lognormal, else normal)
+        mu (float): Mean of the underlying normal distribution (for lognormal) or mean of normal distribution
+        sigma (float): Standard deviation of the underlying normal distribution (for lognormal) or std of normal distribution
+        mean (float): Mean of the actual distribution (lognormal or normal)
+        std (float): Standard deviation of the actual distribution (lognormal or normal)
+    """
+    
+    def __init__(self, name:str, mu:float, sigma:float, size:int, log_or_normal:str):
+        """Initialize a Category instance.
+        
+        Args:
+            name (str): Name of the category
+            mu (float): Mean parameter for the distribution
+            sigma (float): Standard deviation parameter for the distribution
+            size (int): Total number of elements in the category
+            log_or_normal (str): 'log' for lognormal distribution, else normal distribution
+        """
         self.name = name
         self.size = size
         self.log_normal = log_or_normal
@@ -111,8 +142,18 @@ class Category:
         self.mean = np.exp((self.mu + self.sigma ** 2) / 2) if log_or_normal == 'log' else self.mu
         self.std = (np.exp(2*self.mu)*(np.exp(self.sigma**2)-1))**(1/2) if log_or_normal == 'log' else self.sigma
 
-    def get_samples(self, sizes):
-        #print(self.name, sizes)
+    def get_samples(self, sizes:list[int]):
+        """Generate random samples from the category's distribution.
+        
+        Args:
+            sizes (array-like): Array of sample sizes to generate for each sample
+            
+        Returns:
+            list: List of numpy arrays containing the generated samples
+            
+        Raises:
+            ValueError: If any requested sample size exceeds the category size
+        """
         if np.any(sizes > self.size):
             raise ValueError("Cannot sample more than available elements.")
         samples = []
@@ -127,7 +168,6 @@ class Category:
             sample = np.maximum(sample, 0)
             samples.append(sample)
         return samples
-
 
 class Player:
     def __init__(self, win_value: float, blind: bool, level: int, name: str):
@@ -206,12 +246,12 @@ class Player:
         other_player = [player for player in game.players if player != self][0]
         return {category_name: strategy[category_name] * (1 - other_player.strategy[category_name]*other_player.win_value/(other_player.win_value + self.win_value)) for category_name, category in game.categories.items()}
 
-    def greedy_top_k_br(self, game, feasible_strategy_numbers, blind=False, verbose=False):
+    def top_k_br(self, game, feasible_strategy_numbers, blind=False, verbose=False):
         """
         Perform Bayesian optimization for top-k allocation using the trained model.
         """
         # Load the trained model
-        model_path = "runs/topk_experiment/best_model_biased.pt.jit"
+        model_path = "../runs/topk_experiment/best_model_biased.pt.jit"
         model = torch.jit.load(model_path)
         model.eval()
         
@@ -228,15 +268,23 @@ class Player:
             # Convert to evaluator format
             category_tuple = self.convert_category_strategy_to_evaluator(game, strategy)
             
-            # Prepare input for the model
+            # Prepare input tensor for the model with shape (1, num_categories, 3)
+            # Each category is represented by 3 features: [mu, sigma, n]
+            # - mu: mean of the distribution
+            # - sigma: standard deviation of the distribution  
+            # - n: number of samples from this distribution
+            # We unsqueeze to add batch dimension (batch size = 1) since the model expects batched input
             x = torch.tensor([
-                [category[1], category[2], category[3]]  # mu, sigma, n
+                [category[1], category[2], category[3]]  # Extract mu, sigma, n for each category
                 for category in category_tuple
-            ], dtype=torch.float32).unsqueeze(0)  # Add batch dimension
+            ], dtype=torch.float32).unsqueeze(0)
             
+            # Prepare k tensor representing the top-k ratio
+            # We normalize game.top_k by total sample size to get a ratio between 0-1
+            # This helps the model generalize across different absolute k values
+            # Shape is (1, 1) to match expected input dimensions
             k = torch.tensor([[game.top_k / sum(category[3] for category in category_tuple)]], 
                             dtype=torch.float32)
-            
             # Get prediction
             with torch.no_grad():
                 pred = model(x, k)

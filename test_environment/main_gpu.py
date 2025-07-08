@@ -152,31 +152,18 @@ def process_row(row, verbose=False, visualize=False):
     return histogram_df
 
 
-# Test the function by importing a single file from the not_started folder
-# Run the function on a single row of the file
-# Print the results
-'''
+# we want to test the efficacy of our top_k_br function
+
 if __name__ == "__main__":
-    import pandas as pd
-    # Import a single file from the not_started folder
+    # Load the first experiment case
+    params_df = pd.read_csv("test_environment/params_file_1002_occupancy0.99_modetop_k.csv")
+    first_row = params_df.iloc[0]
     
-    # set up the file path by importing with os listdir
-    import os
-    file_path = 'not_started/' + os.listdir("not_started")[0]
-    df = pd.read_csv(file_path)
-    # Needs to get the second row of the dataframe because otherwise it's the header
-    # print the header
-    
-    print(df.columns)
-    row = df.iloc[3]
-    print(row)
-    #print()
-    results = process_row(row)
-    print(results)
-    output_row = pd.concat([row, pd.Series(results[0], name='poly_coeffs'), pd.Series([results[1], results[2]], index=['mean', 'std'])]).to_frame().T
-    # Check if file exists to determine if we need to write headers
-    output_file = f'display/{os.path.splitext(os.path.basename(file_path))[0]}.csv'
-    write_header = not os.path.exists(output_file)
-    output_row.to_csv(output_file, mode='a', header=write_header, index=False)
-'''
+    # Run the experiment
+    print("Running first experiment case...")
+    results = process_row(first_row, verbose=True)
+    print("\nResults:")
+    print(results[['mean', 'std']].head())
+
+
 
